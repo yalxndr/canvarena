@@ -1,11 +1,10 @@
 {
-	"id": "canvarena",
-	"name": "Canvarena",
-	"version": "1.0.1",
-	"minAppVersion": "0.15.0",
-	"description": "Searches Are.na and populates a Canvas with image blocks.",
-	"author": "yalxndr",
-	"authorUrl": "https://github.com/yalxndr",
-	"fundingUrl": "https://obsidian.md/pricing",
-	"isDesktopOnly": false
+  "id": "canvarena",
+  "name": "Canvarena",
+  "version": "1.0.2",
+  "minAppVersion": "0.15.0",
+  "description": "Searches Are.na and populates a Canvas with image blocks.",
+  "author": "yalxndr",
+  "authorUrl": "https://github.com/yalxndr",
+  "isDesktopOnly": false
 }
