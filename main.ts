@@ -1,134 +1,181 @@
-import { App, Editor, MarkdownView, Modal, Notice, Plugin, PluginSettingTab, Setting } from 'obsidian';
+import { App, Notice, Plugin, PluginSettingTab, Setting, TFile, requestUrl, ItemView } from 'obsidian';
 
-// Remember to rename these classes and interfaces!
-
-interface MyPluginSettings {
-	mySetting: string;
+// Интерфейс для хранения наших настроек (только API ключ)
+interface ArenaCanvasSettings {
+    apiKey: string;
 }
 
-const DEFAULT_SETTINGS: MyPluginSettings = {
-	mySetting: 'default'
+// Настройки по умолчанию
+const DEFAULT_SETTINGS: ArenaCanvasSettings = {
+    apiKey: ''
 }
 
-export default class MyPlugin extends Plugin {
-	settings: MyPluginSettings;
+// Основной класс нашего плагина
+export default class ArenaCanvasPlugin extends Plugin {
+    settings: ArenaCanvasSettings;
 
-	async onload() {
-		await this.loadSettings();
+    async onload() {
+        // Загружаем настройки при старте плагина
+        await this.loadSettings();
 
-		// This creates an icon in the left ribbon.
-		const ribbonIconEl = this.addRibbonIcon('dice', 'Sample Plugin', (_evt: MouseEvent) => {
-			// Called when the user clicks the icon.
-			new Notice('This is a notice!');
-		});
-		// Perform additional things with the ribbon
-		ribbonIconEl.addClass('my-plugin-ribbon-class');
+        // Добавляем страницу настроек
+        this.addSettingTab(new ArenaCanvasSettingTab(this.app, this));
 
-		// This adds a status bar item to the bottom of the app. Does not work on mobile apps.
-		const statusBarItemEl = this.addStatusBarItem();
-		statusBarItemEl.setText('Status Bar Text');
+        // Регистрируем событие, которое будет следить за изменениями файлов
+        // Это основной "слушатель", который запускает наш плагин
+        this.registerEvent(
+            this.app.vault.on('modify', this.handleFileModify)
+        );
+    }
 
-		// This adds a simple command that can be triggered anywhere
-		this.addCommand({
-			id: 'open-sample-modal-simple',
-			name: 'Open sample modal (simple)',
-			callback: () => {
-				new SampleModal(this.app).open();
-			}
-		});
-		// This adds an editor command that can perform some operation on the current editor instance
-		this.addCommand({
-			id: 'sample-editor-command',
-			name: 'Sample editor command',
-			editorCallback: (editor: Editor, _view: MarkdownView) => {
-				console.log(editor.getSelection());
-				editor.replaceSelection('Sample Editor Command');
-			}
-		});
-		// This adds a complex command that can check whether the current state of the app allows execution of the command
-		this.addCommand({
-			id: 'open-sample-modal-complex',
-			name: 'Open sample modal (complex)',
-			checkCallback: (checking: boolean) => {
-				// Conditions to check
-				const markdownView = this.app.workspace.getActiveViewOfType(MarkdownView);
-				if (markdownView) {
-					// If checking is true, we're simply "checking" if the command can be run.
-					// If checking is false, then we want to actually perform the operation.
-					if (!checking) {
-						new SampleModal(this.app).open();
-					}
+    onunload() {
+        // Код, который выполнится при отключении плагина
+    }
 
-					// This command will only show up in Command Palette when the check function returns true
-					return true;
-				}
-			}
-		});
+    async loadSettings() {
+        this.settings = Object.assign({}, DEFAULT_SETTINGS, await this.loadData());
+    }
 
-		// This adds a settings tab so the user can configure various aspects of the plugin
-		this.addSettingTab(new SampleSettingTab(this.app, this));
+    async saveSettings() {
+        await this.saveData(this.settings);
+    }
 
-		// If the plugin hooks up any global DOM events (on parts of the app that doesn't belong to this plugin)
-		// Using this function will automatically remove the event listener when this plugin is disabled.
-		this.registerDomEvent(document, 'click', (evt: MouseEvent) => {
-			console.log('click', evt);
-		});
+    // --- ОСНОВНАЯ ЛОГИКА ПЛАГИНА ---
 
-		// When registering intervals, this function will automatically clear the interval when the plugin is disabled.
-		this.registerInterval(window.setInterval(() => console.log('setInterval'), 5 * 60 * 1000));
-	}
+    // Эта функция вызывается каждый раз, когда какой-либо файл в хранилище изменяется
+    private handleFileModify = async (file: TFile) => {
+        // 1. Убеждаемся, что измененный файл - это Canvas и он сейчас активен
+        if (file.extension !== 'canvas') return;
+        const activeLeaf = this.app.workspace.getActiveViewOfType(ItemView);
+        if (!activeLeaf || activeLeaf.getViewType() !== 'canvas' || activeLeaf.getDisplayText() !== file.basename) {
+            return;
+        }
 
-	onunload() {
+        const canvas = (activeLeaf as any).canvas;
+        if (!canvas) return;
 
-	}
+        const canvasData = canvas.getData();
+        let wasModified = false;
 
-	async loadSettings() {
-		this.settings = Object.assign({}, DEFAULT_SETTINGS, await this.loadData());
-	}
+        // 2. Ищем ноды (карточки) с нашей командой
+        for (const node of canvasData.nodes) {
+            if (node.type === 'text' && node.text.startsWith('/arena ')) {
+                const query = node.text.replace('/arena ', '').trim();
+                if (query.length === 0) continue;
 
-	async saveSettings() {
-		await this.saveData(this.settings);
-	}
+                console.log(`Arena Canvas: Found command for query: ${query}`);
+                new Notice(`Searching Are.na for "${query}"...`);
+
+                // 3. Выполняем поиск через API
+                const imageUrls = await this.searchArena(query);
+                if (imageUrls.length === 0) {
+                    new Notice(`No images found for "${query}"`);
+                    node.text = `No results: ${query}`; // Изменяем текст, чтобы не искать повторно
+                    wasModified = true;
+                    continue;
+                }
+
+                // 4. Очищаем исходную ноду и создаем новые
+                node.text = query; // Заменяем текст в исходной карточке
+                
+                const parentNode = node;
+                const startX = parentNode.x + parentNode.width + 100;
+                const startY = parentNode.y;
+
+                for (let i = 0; i < imageUrls.length; i++) {
+                    const imageUrl = imageUrls[i];
+                    const newNodeId = `arena_${Date.now()}_${i}`; // Более надежный ID
+
+                    // Создаем ноду с картинкой
+                    const newNode = {
+                        id: newNodeId,
+                        type: 'link', // Тип 'link' отлично превьюит изображения по URL
+                        url: imageUrl,
+                        x: startX + (i % 3) * 320, // Располагаем в сетку 3xN
+                        y: startY + Math.floor(i / 3) * 220,
+                        width: 300,
+                        height: 200,
+                    };
+                    canvasData.nodes.push(newNode);
+
+                    // Создаем связь (линию) от запроса к картинке
+                    const newEdgeId = `edge_${parentNode.id}_${newNode.id}`;
+                    const newEdge = {
+                        id: newEdgeId,
+                        fromNode: parentNode.id,
+                        fromSide: 'right',
+                        toNode: newNode.id,
+                        toSide: 'left',
+                    };
+                    canvasData.edges.push(newEdge);
+                }
+                
+                wasModified = true;
+            }
+        }
+
+        // 5. Если были изменения, обновляем Canvas
+        if (wasModified) {
+            canvas.setData(canvasData);
+            canvas.requestSave();
+        }
+    };
+
+    // Функция для запроса к API Are.na
+    private async searchArena(query: string): Promise<string[]> {
+        if (!this.settings.apiKey) {
+            new Notice("Are.na API key is not set in plugin settings.");
+            return [];
+        }
+
+        const url = `https://api.are.na/v2/search/blocks?q=${encodeURIComponent(query)}&per=9`;
+
+        try {
+            const response = await requestUrl({
+                url: url,
+                method: 'GET',
+                headers: { 'Authorization': `Bearer ${this.settings.apiKey}` }
+            });
+
+            const data = response.json;
+            if (data.blocks) {
+                const imageUrls = data.blocks
+                    .filter((block: any) => block.class === 'Image' && block.image)
+                    .map((block: any) => block.image.display.url);
+                return imageUrls;
+            }
+            return [];
+        } catch (error) {
+            console.error("Error fetching from Are.na API:", error);
+            new Notice("Failed to fetch from Are.na. Check console for details.");
+            return [];
+        }
+    }
 }
 
-class SampleModal extends Modal {
-	constructor(app: App) {
-		super(app);
-	}
+// Класс для создания страницы настроек
+class ArenaCanvasSettingTab extends PluginSettingTab {
+    plugin: ArenaCanvasPlugin;
 
-	onOpen() {
-		const {contentEl} = this;
-		contentEl.setText('Woah!');
-	}
+    constructor(app: App, plugin: ArenaCanvasPlugin) {
+        super(app, plugin);
+        this.plugin = plugin;
+    }
 
-	onClose() {
-		const {contentEl} = this;
-		contentEl.empty();
-	}
-}
+    display(): void {
+        const { containerEl } = this;
+        containerEl.empty();
+        containerEl.createEl('h2', { text: 'Arena Canvas Settings' });
 
-class SampleSettingTab extends PluginSettingTab {
-	plugin: MyPlugin;
-
-	constructor(app: App, plugin: MyPlugin) {
-		super(app, plugin);
-		this.plugin = plugin;
-	}
-
-	display(): void {
-		const {containerEl} = this;
-
-		containerEl.empty();
-
-		new Setting(containerEl)
-			.setName('Setting #1')
-			.setDesc('It\'s a secret')
-			.addText(text => text
-				.setPlaceholder('Enter your secret')
-				.setValue(this.plugin.settings.mySetting)
-				.onChange(async (value) => {
-					this.plugin.settings.mySetting = value;
-					await this.plugin.saveSettings();
-				}));
-	}
+        new Setting(containerEl)
+            .setName('Are.na Personal Access Token')
+            .setDesc('You can get this from your Are.na account settings.')
+            .addText(text => text
+                .setPlaceholder('Enter your API token')
+                .setValue(this.plugin.settings.apiKey)
+                .onChange(async (value) => {
+                    this.plugin.settings.apiKey = value;
+                    await this.plugin.saveSettings();
+                }));
+    }
 }

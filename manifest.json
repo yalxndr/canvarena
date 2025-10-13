@@ -1,11 +1,10 @@
 {
-	"id": "sample-plugin",
-	"name": "Sample Plugin",
+	"id": "canvarena",
+	"name": "Canvarena",
 	"version": "1.0.0",
 	"minAppVersion": "0.15.0",
-	"description": "Demonstrates some of the capabilities of the Obsidian API.",
-	"author": "Obsidian",
-	"authorUrl": "https://obsidian.md",
+	"description": "Searches Are.na and populates a Canvas with image blocks.",
+	"authorUrl": "https://github.com/yalxndr",
 	"fundingUrl": "https://obsidian.md/pricing",
 	"isDesktopOnly": false
 }
