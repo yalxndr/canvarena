@@ -1,162 +1,199 @@
 import { App, Notice, Plugin, PluginSettingTab, Setting, TFile, requestUrl, ItemView } from 'obsidian';
 
-// Интерфейс для хранения наших настроек (только API ключ)
-interface ArenaCanvasSettings {
+// --- ИНТЕРФЕЙСЫ ---
+
+interface ArenaCanvasSettings { 
     apiKey: string;
+    collectionJumps: number;
+}
+const DEFAULT_SETTINGS: ArenaCanvasSettings = { 
+    apiKey: '',
+    collectionJumps: 20
 }
 
-// Настройки по умолчанию
-const DEFAULT_SETTINGS: ArenaCanvasSettings = {
-    apiKey: ''
+// ИСПРАВЛЕНИЕ ЗДЕСЬ: Создаем специальный интерфейс для Canvas
+interface CanvasView extends ItemView { 
+    canvas: any; 
 }
 
-// Основной класс нашего плагина
+// ... Остальные интерфейсы без изменений
+interface ArenaBlock { id: number; class: 'Image' | 'Text' | 'Link' | 'Attachment' | 'Channel'; title: string; image?: { display: { url: string; } }; }
+interface ArenaConnection { id: number; title: string; }
+interface CanvasNodeData { id: string; x: number; y: number; width: number; height: number; type: 'text' | 'link' | 'file'; text?: string; url?: string; }
+interface CanvasData { nodes: CanvasNodeData[]; edges: any[]; }
+
+// --- ОСНОВНОЙ КЛАСС ПЛАГИНА ---
+
 export default class ArenaCanvasPlugin extends Plugin {
     settings: ArenaCanvasSettings;
 
     async onload() {
-        // Загружаем настройки при старте плагина
         await this.loadSettings();
-
-        // Добавляем страницу настроек
         this.addSettingTab(new ArenaCanvasSettingTab(this.app, this));
-
-        // Регистрируем событие, которое будет следить за изменениями файлов
-        // Это основной "слушатель", который запускает наш плагин
-        this.registerEvent(
-            this.app.vault.on('modify', this.handleFileModify)
-        );
+        this.registerEvent(this.app.vault.on('modify', this.handleFileModify));
     }
 
-    onunload() {
-        // Код, который выполнится при отключении плагина
-    }
+    onunload() {}
+    async loadSettings() { this.settings = Object.assign({}, DEFAULT_SETTINGS, await this.loadData()); }
+    async saveSettings() { await this.saveData(this.settings); }
 
-    async loadSettings() {
-        this.settings = Object.assign({}, DEFAULT_SETTINGS, await this.loadData());
-    }
-
-    async saveSettings() {
-        await this.saveData(this.settings);
-    }
-
-    // --- ОСНОВНАЯ ЛОГИКА ПЛАГИНА ---
-
-    // Эта функция вызывается каждый раз, когда какой-либо файл в хранилище изменяется
     private handleFileModify = async (file: TFile) => {
-        // 1. Убеждаемся, что измененный файл - это Canvas и он сейчас активен
         if (file.extension !== 'canvas') return;
         const activeLeaf = this.app.workspace.getActiveViewOfType(ItemView);
-        if (!activeLeaf || activeLeaf.getViewType() !== 'canvas' || activeLeaf.getDisplayText() !== file.basename) {
+        if (!activeLeaf || activeLeaf.getViewType() !== 'canvas') return;
+        
+        // ИСПРАВЛЕНИЕ ЗДЕСЬ: Вместо 'as any' используем наш новый, точный интерфейс 'CanvasView'
+        const canvas = (activeLeaf as CanvasView).canvas;
+        if (!canvas) return;
+
+        const activeNode = canvas.selection?.values()?.next()?.value;
+        if (!activeNode || !activeNode.text || !activeNode.text.includes('\n')) {
             return;
         }
 
-        const canvas = (activeLeaf as any).canvas;
-        if (!canvas) return;
-
-        const canvasData = canvas.getData();
+        const commandText = activeNode.text.replace(/\n$/, '').trim();
         let wasModified = false;
-
-        // 2. Ищем ноды (карточки) с нашей командой
-        for (const node of canvasData.nodes) {
-            if (node.type === 'text' && node.text.startsWith('/arena ')) {
-                const query = node.text.replace('/arena ', '').trim();
-                if (query.length === 0) continue;
-
-                console.log(`Arena Canvas: Found command for query: ${query}`);
-                new Notice(`Searching Are.na for "${query}"...`);
-
-                // 3. Выполняем поиск через API
-                const imageUrls = await this.searchArena(query);
-                if (imageUrls.length === 0) {
-                    new Notice(`No images found for "${query}"`);
-                    node.text = `No results: ${query}`; // Изменяем текст, чтобы не искать повторно
-                    wasModified = true;
-                    continue;
-                }
-
-                // 4. Очищаем исходную ноду и создаем новые
-                node.text = query; // Заменяем текст в исходной карточке
-                
-                const parentNode = node;
-                const startX = parentNode.x + parentNode.width + 100;
-                const startY = parentNode.y;
-
-                for (let i = 0; i < imageUrls.length; i++) {
-                    const imageUrl = imageUrls[i];
-                    const newNodeId = `arena_${Date.now()}_${i}`; // Более надежный ID
-
-                    // Создаем ноду с картинкой
-                    const newNode = {
-                        id: newNodeId,
-                        type: 'link', // Тип 'link' отлично превьюит изображения по URL
-                        url: imageUrl,
-                        x: startX + (i % 3) * 320, // Располагаем в сетку 3xN
-                        y: startY + Math.floor(i / 3) * 220,
-                        width: 300,
-                        height: 200,
-                    };
-                    canvasData.nodes.push(newNode);
-
-                    // Создаем связь (линию) от запроса к картинке
-                    const newEdgeId = `edge_${parentNode.id}_${newNode.id}`;
-                    const newEdge = {
-                        id: newEdgeId,
-                        fromNode: parentNode.id,
-                        fromSide: 'right',
-                        toNode: newNode.id,
-                        toSide: 'left',
-                    };
-                    canvasData.edges.push(newEdge);
-                }
-                
-                wasModified = true;
+        
+        const canvasData: CanvasData = canvas.getData();
+        
+        if (commandText.startsWith('/collect ')) {
+            const triggerNode = canvasData.nodes.find((n: CanvasNodeData) => n.id === activeNode.id);
+            if(triggerNode) {
+                wasModified = await this.handleCollectCommand(triggerNode, canvasData, commandText);
             }
         }
-
-        // 5. Если были изменения, обновляем Canvas
+        
         if (wasModified) {
             canvas.setData(canvasData);
             canvas.requestSave();
         }
     };
 
-    // Функция для запроса к API Are.na
-    private async searchArena(query: string): Promise<string[]> {
-        if (!this.settings.apiKey) {
-            new Notice("Are.na API key is not set in plugin settings.");
-            return [];
+    // ... Весь остальной код плагина остается без изменений ...
+    // Я приведу его полностью ниже, чтобы ты мог просто скопировать весь файл.
+    
+    private async handleCollectCommand(triggerNode: CanvasNodeData, canvasData: CanvasData, commandText: string): Promise<boolean> {
+        const query = commandText.replace('/collect ', '').trim();
+        if (query.length === 0) {
+            new Notice("Please provide a starting query for /collect.");
+            return false;
         }
 
-        const url = `https://api.are.na/v2/search/blocks?q=${encodeURIComponent(query)}&per=9`;
+        new Notice(`Starting collection for "${query}"...`);
+        let currentBlock: ArenaBlock | null = await this.findFirstImageBlock(query);
 
-        try {
-            const response = await requestUrl({
-                url: url,
-                method: 'GET',
-                headers: { 'Authorization': `Bearer ${this.settings.apiKey}` }
-            });
+        if (!currentBlock) {
+            new Notice(`Could not find an initial block for "${query}".`);
+            triggerNode.text = `No results: ${query}`;
+            return true;
+        }
 
-            const data = response.json;
-            if (data.blocks) {
-                const imageUrls = data.blocks
-                    .filter((block: any) => block.class === 'Image' && block.image)
-                    .map((block: any) => block.image.display.url);
-                return imageUrls;
+        triggerNode.text = `Collection started with:\n${query}`;
+        let previousNodeOnCanvas = triggerNode;
+
+        for (let i = 0; i < this.settings.collectionJumps; i++) {
+            if (!currentBlock) {
+                new Notice("Stopping collection due to an unexpected error.");
+                break;
             }
-            return [];
+
+            new Notice(`Collecting... Step ${i + 1}/${this.settings.collectionJumps}`);
+            
+            const currentNodeOnCanvas = this.createNodeFromBlock(currentBlock, previousNodeOnCanvas.x, previousNodeOnCanvas.y + previousNodeOnCanvas.height + 120);
+            canvasData.nodes.push(currentNodeOnCanvas);
+            canvasData.edges.push({ id: `edge_${previousNodeOnCanvas.id}_${currentNodeOnCanvas.id}`, fromNode: previousNodeOnCanvas.id, fromSide: 'bottom', toNode: currentNodeOnCanvas.id, toSide: 'top' });
+
+            const connections: ArenaConnection[] = await this.getBlockConnections(currentBlock.id);
+            if (connections.length === 0) {
+                new Notice("Reached a dead end (no connections). Stopping collection.");
+                break;
+            }
+            await this.updateConnectionsFile(currentBlock.title, connections);
+            
+            const randomConnection: ArenaConnection = connections[Math.floor(Math.random() * connections.length)];
+            
+            const channelBlocks: ArenaBlock[] = await this.getChannelContents(randomConnection.id);
+            if (channelBlocks.length === 0) {
+                new Notice(`Channel "${randomConnection.title}" is empty. Stopping collection.`);
+                break;
+            }
+            
+            const nextBlock: ArenaBlock = channelBlocks[Math.floor(Math.random() * channelBlocks.length)];
+            
+            currentBlock = nextBlock;
+            previousNodeOnCanvas = currentNodeOnCanvas;
+        }
+
+        new Notice("Collection complete!");
+        return true;
+    }
+
+    private createNodeFromBlock(block: ArenaBlock, x: number, y: number, width = 300, height = 250): CanvasNodeData {
+        const baseNode = { id: `block_${block.id}_${Date.now()}`, x, y, width, height };
+        if (block.class === 'Image' && block.image) {
+            return { ...baseNode, type: 'link', url: block.image.display.url };
+        }
+        return { ...baseNode, type: 'text', text: block.title || 'Untitled Block' };
+    }
+
+    private async getChannelContents(channelId: number): Promise<ArenaBlock[]> {
+        if (!this.settings.apiKey) return [];
+        const url = `https://api.are.na/v2/channels/${channelId}/contents?per=50`;
+        try {
+            const response = await requestUrl({ url, method: 'GET', headers: { 'Authorization': `Bearer ${this.settings.apiKey}` } });
+            return response.json.contents as ArenaBlock[] || [];
         } catch (error) {
-            console.error("Error fetching from Are.na API:", error);
-            new Notice("Failed to fetch from Are.na. Check console for details.");
+            console.error(`Error fetching contents for channel ${channelId}:`, error);
             return [];
         }
     }
+
+    private async updateConnectionsFile(query: string, connections: ArenaConnection[]): Promise<void> {
+        if (connections.length === 0) return;
+        const folderName = 'Canvarena';
+        const fileName = 'Connections.md';
+        const filePath = `${folderName}/${fileName}`;
+        const tags = connections.map(c => `#${c.title.replace(/\s+/g, '_').replace(/[^a-zA-Z0-9_]/g, '')}`).join(' ');
+        const newEntry = `\n[[${query}]]\n${tags}\n`;
+        try {
+            if (!await this.app.vault.adapter.exists(folderName)) {
+                await this.app.vault.createFolder(folderName);
+            }
+            const file = this.app.vault.getAbstractFileByPath(filePath);
+            if (file instanceof TFile) {
+                await this.app.vault.append(file, newEntry);
+            } else {
+                await this.app.vault.create(filePath, newEntry.trim());
+            }
+        } catch (error) {
+            console.error("Canvarena: Error updating connections file:", error);
+            new Notice("Could not update Connections.md file.");
+        }
+    }
+
+    private async findFirstImageBlock(query: string): Promise<ArenaBlock | null> {
+        if (!this.settings.apiKey) { new Notice("Are.na API key is not set in plugin settings."); return null; }
+        const url = `https://api.are.na/v2/search/blocks?q=${encodeURIComponent(query)}&per=10`;
+        try {
+            const response = await requestUrl({ url, method: 'GET', headers: { 'Authorization': `Bearer ${this.settings.apiKey}` } });
+            const data = response.json;
+            if (data.blocks && data.blocks.length > 0) return data.blocks.find((block: ArenaBlock) => block.class === 'Image' && block.image) || data.blocks[0];
+            return null;
+        } catch (error) { console.error("Error searching Are.na:", error); return null; }
+    }
+
+    private async getBlockConnections(blockId: number): Promise<ArenaConnection[]> {
+        if (!this.settings.apiKey) return [];
+        const url = `https://api.are.na/v2/blocks/${blockId}`;
+        try {
+            const response = await requestUrl({ url, method: 'GET', headers: { 'Authorization': `Bearer ${this.settings.apiKey}` } });
+            return response.json.connections || [];
+        } catch (error) { console.error(`Error fetching connections for block ${blockId}:`, error); return []; }
+    }
 }
 
-// Класс для создания страницы настроек
 class ArenaCanvasSettingTab extends PluginSettingTab {
     plugin: ArenaCanvasPlugin;
-
     constructor(app: App, plugin: ArenaCanvasPlugin) {
         super(app, plugin);
         this.plugin = plugin;
@@ -165,11 +202,10 @@ class ArenaCanvasSettingTab extends PluginSettingTab {
     display(): void {
         const { containerEl } = this;
         containerEl.empty();
-        containerEl.createEl('h2', { text: 'Arena Canvas Settings' });
+        containerEl.createEl('h2', { text: 'Canvarena Settings' });
 
         new Setting(containerEl)
             .setName('Are.na Personal Access Token')
-            .setDesc('You can get this from your Are.na account settings.')
             .addText(text => text
                 .setPlaceholder('Enter your API token')
                 .setValue(this.plugin.settings.apiKey)
@@ -177,5 +213,59 @@ class ArenaCanvasSettingTab extends PluginSettingTab {
                     this.plugin.settings.apiKey = value;
                     await this.plugin.saveSettings();
                 }));
+        
+        new Setting(containerEl)
+            .setName('Collection Jumps')
+            .setDesc('How many steps the /collect command should take to gather data.')
+            .addText(text => text
+                .setValue(String(this.plugin.settings.collectionJumps))
+                .onChange(async (value) => {
+                    const numValue = parseInt(value, 10);
+                    if (!isNaN(numValue) && numValue > 0) {
+                        this.plugin.settings.collectionJumps = numValue;
+                        await this.plugin.saveSettings();
+                    }
+                }));
+
+        new Setting(containerEl)
+            .setName('Import Dictionary')
+            .setDesc('Import a .txt file with one term per line to build your semantic dictionary (Im_connections.md).')
+            .addButton(button => {
+                button.setButtonText('Upload .txt file')
+                    .onClick(() => {
+                        const input = createEl('input', { type: 'file', attr: { accept: '.txt' } });
+                        input.onchange = async (e) => {
+                            const file = (e.target as HTMLInputElement).files?.[0];
+                            if (!file) return;
+
+                            const content = await file.text();
+                            const lines = content.split('\n').filter(line => line.trim() !== '');
+                            const taggedContent = lines.map(line => `#${line.trim()}`).join('\n');
+
+                            const folderName = 'Canvarena';
+                            const fileName = 'Im_connections.md';
+                            const filePath = `${folderName}/${fileName}`;
+
+                            try {
+                                if (!await this.app.vault.adapter.exists(folderName)) {
+                                    await this.app.vault.createFolder(folderName);
+                                }
+                                const fileExists = await this.app.vault.adapter.exists(filePath);
+                                if (fileExists) {
+                                    const existingContent = await this.app.vault.adapter.read(filePath);
+                                    await this.app.vault.adapter.write(filePath, existingContent + '\n' + taggedContent);
+                                    new Notice(`Dictionary updated in ${filePath}`);
+                                } else {
+                                    await this.app.vault.create(filePath, taggedContent);
+                                    new Notice(`Dictionary created at ${filePath}`);
+                                }
+                            } catch (err) {
+                                new Notice('Error importing dictionary. Check console.');
+                                console.error('Dictionary import error:', err);
+                            }
+                        };
+                        input.click();
+                    });
+            });
     }
 }
