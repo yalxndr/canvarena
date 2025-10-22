@@ -1,7 +1,7 @@
 {
   "id": "canvarena",
   "name": "Canvarena",
-  "version": "1.0.2",
+  "version": "1.0.3",
   "minAppVersion": "0.15.0",
   "description": "Searches Are.na and populates a Canvas with image blocks.",
   "author": "yalxndr",
