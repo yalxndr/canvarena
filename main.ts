@@ -11,16 +11,35 @@ const DEFAULT_SETTINGS: ArenaCanvasSettings = {
     collectionJumps: 20
 }
 
-// ИСПРАВЛЕНИЕ ЗДЕСЬ: Создаем специальный интерфейс для Canvas
-interface CanvasView extends ItemView { 
-    canvas: any; 
+// ИЗМЕНЕНО: Более точный тип для Canvas, описывающий только то, что мы используем
+interface Canvas {
+    selection: Map<string, any>;
+    getData(): CanvasData;
+    setData(data: CanvasData): void;
+    requestSave(): void;
 }
 
-// ... Остальные интерфейсы без изменений
+interface CanvasView extends ItemView { 
+    canvas: Canvas; 
+}
+
 interface ArenaBlock { id: number; class: 'Image' | 'Text' | 'Link' | 'Attachment' | 'Channel'; title: string; image?: { display: { url: string; } }; }
 interface ArenaConnection { id: number; title: string; }
 interface CanvasNodeData { id: string; x: number; y: number; width: number; height: number; type: 'text' | 'link' | 'file'; text?: string; url?: string; }
-interface CanvasData { nodes: CanvasNodeData[]; edges: any[]; }
+
+// ИЗМЕНЕНО: Добавляем тип для ребер (edges)
+interface CanvasEdgeData {
+    id: string;
+    fromNode: string;
+    fromSide: 'top' | 'right' | 'bottom' | 'left';
+    toNode: string;
+    toSide: 'top' | 'right' | 'bottom' | 'left';
+}
+
+interface CanvasData { 
+    nodes: CanvasNodeData[]; 
+    edges: CanvasEdgeData[]; // Используем новый тип
+}
 
 // --- ОСНОВНОЙ КЛАСС ПЛАГИНА ---
 
@@ -42,7 +61,6 @@ export default class ArenaCanvasPlugin extends Plugin {
         const activeLeaf = this.app.workspace.getActiveViewOfType(ItemView);
         if (!activeLeaf || activeLeaf.getViewType() !== 'canvas') return;
         
-        // ИСПРАВЛЕНИЕ ЗДЕСЬ: Вместо 'as any' используем наш новый, точный интерфейс 'CanvasView'
         const canvas = (activeLeaf as CanvasView).canvas;
         if (!canvas) return;
 
@@ -68,9 +86,6 @@ export default class ArenaCanvasPlugin extends Plugin {
             canvas.requestSave();
         }
     };
-
-    // ... Весь остальной код плагина остается без изменений ...
-    // Я приведу его полностью ниже, чтобы ты мог просто скопировать весь файл.
     
     private async handleCollectCommand(triggerNode: CanvasNodeData, canvasData: CanvasData, commandText: string): Promise<boolean> {
         const query = commandText.replace('/collect ', '').trim();
@@ -167,7 +182,8 @@ export default class ArenaCanvasPlugin extends Plugin {
             }
         } catch (error) {
             console.error("Canvarena: Error updating connections file:", error);
-            new Notice("Could not update Connections.md file.");
+            // ИЗМЕНЕНО: Sentence case
+            new Notice("Could not update connections.md file.");
         }
     }
 
@@ -202,10 +218,16 @@ class ArenaCanvasSettingTab extends PluginSettingTab {
     display(): void {
         const { containerEl } = this;
         containerEl.empty();
-        containerEl.createEl('h2', { text: 'Canvarena Settings' });
+        
+        // ИЗМЕНЕНО: Заменяем h2 на setHeading() и используем Sentence case
+        new Setting(containerEl)
+            .setName('Canvarena settings')
+            .setHeading();
 
         new Setting(containerEl)
-            .setName('Are.na Personal Access Token')
+            // ИЗМЕНЕНО: Sentence case
+            .setName('Are.na personal access token')
+            .setDesc('You can get this from your Are.na account settings.')
             .addText(text => text
                 .setPlaceholder('Enter your API token')
                 .setValue(this.plugin.settings.apiKey)
@@ -215,7 +237,8 @@ class ArenaCanvasSettingTab extends PluginSettingTab {
                 }));
         
         new Setting(containerEl)
-            .setName('Collection Jumps')
+            // ИЗМЕНЕНО: Sentence case
+            .setName('Collection jumps')
             .setDesc('How many steps the /collect command should take to gather data.')
             .addText(text => text
                 .setValue(String(this.plugin.settings.collectionJumps))
@@ -228,8 +251,10 @@ class ArenaCanvasSettingTab extends PluginSettingTab {
                 }));
 
         new Setting(containerEl)
-            .setName('Import Dictionary')
-            .setDesc('Import a .txt file with one term per line to build your semantic dictionary (Im_connections.md).')
+            // ИЗМЕНЕНО: Sentence case
+            .setName('Import dictionary')
+            // ИЗМЕНЕНО: Sentence case
+            .setDesc('Import a .txt file with one term per line to build your semantic dictionary (im_connections.md).')
             .addButton(button => {
                 button.setButtonText('Upload .txt file')
                     .onClick(() => {
@@ -260,6 +285,7 @@ class ArenaCanvasSettingTab extends PluginSettingTab {
                                     new Notice(`Dictionary created at ${filePath}`);
                                 }
                             } catch (err) {
+                                // ИЗМЕНЕНО: Sentence case
                                 new Notice('Error importing dictionary. Check console.');
                                 console.error('Dictionary import error:', err);
                             }
