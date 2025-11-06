@@ -11,9 +11,13 @@ const DEFAULT_SETTINGS: ArenaCanvasSettings = {
     collectionJumps: 20
 }
 
-// ИЗМЕНЕНО: Более точный тип для Canvas, описывающий только то, что мы используем
+// ИСПРАВЛЕНИЕ ЗДЕСЬ: Убираем 'any', создавая точные типы
+interface CanvasNodeData { id: string; x: number; y: number; width: number; height: number; type: 'text' | 'link' | 'file'; text?: string; url?: string; }
+interface CanvasEdgeData { id: string; fromNode: string; fromSide: 'top' | 'right' | 'bottom' | 'left'; toNode: string; toSide: 'top' | 'right' | 'bottom' | 'left'; }
+interface CanvasData { nodes: CanvasNodeData[]; edges: CanvasEdgeData[]; }
+
 interface Canvas {
-    selection: Map<string, any>;
+    selection: Map<string, { text?: string, id: string }>;
     getData(): CanvasData;
     setData(data: CanvasData): void;
     requestSave(): void;
@@ -25,21 +29,7 @@ interface CanvasView extends ItemView {
 
 interface ArenaBlock { id: number; class: 'Image' | 'Text' | 'Link' | 'Attachment' | 'Channel'; title: string; image?: { display: { url: string; } }; }
 interface ArenaConnection { id: number; title: string; }
-interface CanvasNodeData { id: string; x: number; y: number; width: number; height: number; type: 'text' | 'link' | 'file'; text?: string; url?: string; }
 
-// ИЗМЕНЕНО: Добавляем тип для ребер (edges)
-interface CanvasEdgeData {
-    id: string;
-    fromNode: string;
-    fromSide: 'top' | 'right' | 'bottom' | 'left';
-    toNode: string;
-    toSide: 'top' | 'right' | 'bottom' | 'left';
-}
-
-interface CanvasData { 
-    nodes: CanvasNodeData[]; 
-    edges: CanvasEdgeData[]; // Используем новый тип
-}
 
 // --- ОСНОВНОЙ КЛАСС ПЛАГИНА ---
 
@@ -182,7 +172,6 @@ export default class ArenaCanvasPlugin extends Plugin {
             }
         } catch (error) {
             console.error("Canvarena: Error updating connections file:", error);
-            // ИЗМЕНЕНО: Sentence case
             new Notice("Could not update connections.md file.");
         }
     }
@@ -219,13 +208,11 @@ class ArenaCanvasSettingTab extends PluginSettingTab {
         const { containerEl } = this;
         containerEl.empty();
         
-        // ИЗМЕНЕНО: Заменяем h2 на setHeading() и используем Sentence case
         new Setting(containerEl)
             .setName('Canvarena settings')
             .setHeading();
 
         new Setting(containerEl)
-            // ИЗМЕНЕНО: Sentence case
             .setName('Are.na personal access token')
             .setDesc('You can get this from your Are.na account settings.')
             .addText(text => text
@@ -237,7 +224,6 @@ class ArenaCanvasSettingTab extends PluginSettingTab {
                 }));
         
         new Setting(containerEl)
-            // ИЗМЕНЕНО: Sentence case
             .setName('Collection jumps')
             .setDesc('How many steps the /collect command should take to gather data.')
             .addText(text => text
@@ -251,9 +237,7 @@ class ArenaCanvasSettingTab extends PluginSettingTab {
                 }));
 
         new Setting(containerEl)
-            // ИЗМЕНЕНО: Sentence case
             .setName('Import dictionary')
-            // ИЗМЕНЕНО: Sentence case
             .setDesc('Import a .txt file with one term per line to build your semantic dictionary (im_connections.md).')
             .addButton(button => {
                 button.setButtonText('Upload .txt file')
@@ -285,7 +269,6 @@ class ArenaCanvasSettingTab extends PluginSettingTab {
                                     new Notice(`Dictionary created at ${filePath}`);
                                 }
                             } catch (err) {
-                                // ИЗМЕНЕНО: Sentence case
                                 new Notice('Error importing dictionary. Check console.');
                                 console.error('Dictionary import error:', err);
                             }
