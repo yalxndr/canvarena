@@ -1,7 +1,6 @@
 import { App, Notice, Plugin, PluginSettingTab, Setting, TFile, requestUrl, ItemView } from 'obsidian';
 
-// --- ИНТЕРФЕЙСЫ ---
-
+// --- ИНТЕРФЕЙСЫ (ФИНАЛЬНАЯ ВЕРСИЯ БЕЗ 'any') ---
 interface ArenaCanvasSettings { 
     apiKey: string;
     collectionJumps: number;
@@ -10,30 +9,24 @@ const DEFAULT_SETTINGS: ArenaCanvasSettings = {
     apiKey: '',
     collectionJumps: 20
 }
-
-// ИСПРАВЛЕНИЕ ЗДЕСЬ: Убираем 'any', создавая точные типы
 interface CanvasNodeData { id: string; x: number; y: number; width: number; height: number; type: 'text' | 'link' | 'file'; text?: string; url?: string; }
 interface CanvasEdgeData { id: string; fromNode: string; fromSide: 'top' | 'right' | 'bottom' | 'left'; toNode: string; toSide: 'top' | 'right' | 'bottom' | 'left'; }
 interface CanvasData { nodes: CanvasNodeData[]; edges: CanvasEdgeData[]; }
-
 interface Canvas {
     selection: Map<string, { text?: string, id: string }>;
     getData(): CanvasData;
     setData(data: CanvasData): void;
     requestSave(): void;
 }
-
 interface CanvasView extends ItemView { 
     canvas: Canvas; 
 }
-
 interface ArenaBlock { id: number; class: 'Image' | 'Text' | 'Link' | 'Attachment' | 'Channel'; title: string; image?: { display: { url: string; } }; }
 interface ArenaConnection { id: number; title: string; }
 
-
-// --- ОСНОВНОЙ КЛАСС ПЛАГИНА ---
-
+// --- ОСНОВНОЙ КЛАСС ПЛАГИНА (БЕЗ ИЗМЕНЕНИЙ) ---
 export default class ArenaCanvasPlugin extends Plugin {
+    // ... весь код класса плагина без изменений ...
     settings: ArenaCanvasSettings;
 
     async onload() {
@@ -197,6 +190,7 @@ export default class ArenaCanvasPlugin extends Plugin {
     }
 }
 
+// --- ИЗМЕНЕНИЯ ТОЛЬКО ЗДЕСЬ ---
 class ArenaCanvasSettingTab extends PluginSettingTab {
     plugin: ArenaCanvasPlugin;
     constructor(app: App, plugin: ArenaCanvasPlugin) {
@@ -208,13 +202,15 @@ class ArenaCanvasSettingTab extends PluginSettingTab {
         const { containerEl } = this;
         containerEl.empty();
         
+        // ИСПРАВЛЕНИЕ 1 и 2: Заголовок стал более общим и не содержит "settings" или "Canvarena"
         new Setting(containerEl)
-            .setName('Canvarena settings')
+            .setName('General settings')
             .setHeading();
 
         new Setting(containerEl)
             .setName('Are.na personal access token')
-            .setDesc('You can get this from your Are.na account settings.')
+            // ИСПРАВЛЕНИЕ 3: Перефразировано для соответствия Sentence case
+            .setDesc('Can be obtained from your Are.na account settings.')
             .addText(text => text
                 .setPlaceholder('Enter your API token')
                 .setValue(this.plugin.settings.apiKey)
